@@ -3,19 +3,21 @@ use std::convert::TryFrom;
 use block_modes::block_padding::{Iso7816, Padding};
 use libsignal_protocol::{
     message_decrypt_prekey, message_decrypt_signal, message_encrypt,
-    sealed_sender_decrypt, sealed_sender_encrypt, CiphertextMessageType,
-    IdentityKeyStore, PreKeySignalMessage, PreKeyStore, ProtocolAddress,
-    PublicKey, SealedSenderDecryptionResult, SenderCertificate, SessionStore,
-    SignalMessage, SignalProtocolError, SignedPreKeyStore,
+    sealed_sender_encrypt, CiphertextMessageType, IdentityKeyStore,
+    PreKeySignalMessage, PreKeyStore, ProtocolAddress, PublicKey,
+    SenderCertificate, SessionStore, SignalMessage, SignalProtocolError,
+    SignedPreKeyStore,
 };
 use prost::Message;
 use rand::{CryptoRng, Rng};
-use uuid::Uuid;
 
 use crate::{
     content::{Content, Metadata},
     envelope::Envelope,
     push_service::ServiceError,
+    sealed_session_cipher::{
+        CertificateValidator, DecryptionResult, SealedSessionCipher,
+    },
     sender::OutgoingPushMessage,
     ServiceAddress,
 };
@@ -30,7 +32,8 @@ pub struct ServiceCipher<S, I, SP, P, R> {
     signed_pre_key_store: SP,
     pre_key_store: P,
     csprng: R,
-    trust_root: PublicKey,
+
+    sealed_session_cipher: SealedSessionCipher<S, I, SP, P, R>,
 }
 
 impl<S, I, SP, P, R> ServiceCipher<S, I, SP, P, R>
@@ -50,12 +53,19 @@ where
         trust_root: PublicKey,
     ) -> Self {
         Self {
-            session_store,
-            identity_key_store,
-            signed_pre_key_store,
-            pre_key_store,
-            csprng,
-            trust_root,
+            session_store: session_store.clone(),
+            identity_key_store: identity_key_store.clone(),
+            signed_pre_key_store: signed_pre_key_store.clone(),
+            pre_key_store: pre_key_store.clone(),
+            csprng: csprng.clone(),
+            sealed_session_cipher: SealedSessionCipher::new(
+                session_store,
+                identity_key_store,
+                signed_pre_key_store,
+                pre_key_store,
+                csprng,
+                CertificateValidator::new(trust_root),
+            ),
         }
     }
 
@@ -103,12 +113,8 @@ where
         };
 
         use crate::proto::envelope::Type;
-        let plaintext = match (
-            envelope.r#type(),
-            envelope.source_uuid.as_ref(),
-            envelope.source_device,
-        ) {
-            (Type::PrekeyBundle, _, _) => {
+        let plaintext = match envelope.r#type() {
+            Type::PrekeyBundle => {
                 let sender = get_preferred_protocol_address(
                     &self.session_store,
                     &envelope.source_address(),
@@ -140,12 +146,14 @@ where
                     .session_store
                     .load_session(&sender, None)
                     .await?
-                    .ok_or(SignalProtocolError::SessionNotFound(sender))?;
+                    .ok_or_else(|| {
+                        SignalProtocolError::SessionNotFound(sender)
+                    })?;
 
                 strip_padding(session_record.session_version()?, &mut data)?;
                 Plaintext { metadata, data }
             },
-            (Type::Ciphertext, _, _) => {
+            Type::Ciphertext => {
                 let sender = get_preferred_protocol_address(
                     &self.session_store,
                     &envelope.source_address(),
@@ -175,42 +183,27 @@ where
                     .session_store
                     .load_session(&sender, None)
                     .await?
-                    .ok_or(SignalProtocolError::SessionNotFound(sender))?;
+                    .ok_or_else(|| {
+                        SignalProtocolError::SessionNotFound(sender)
+                    })?;
 
                 strip_padding(session_record.session_version()?, &mut data)?;
                 Plaintext { metadata, data }
             },
-            (Type::UnidentifiedSender, Some(uuid), Some(source_device)) => {
-                let SealedSenderDecryptionResult {
+            Type::UnidentifiedSender => {
+                let DecryptionResult {
                     sender_uuid,
                     sender_e164,
                     device_id,
-                    message,
-                } = sealed_sender_decrypt(
-                    ciphertext,
-                    &self.trust_root,
-                    envelope.timestamp(),
-                    envelope.source_e164.clone(),
-                    uuid.clone(),
-                    source_device,
-                    &mut self.identity_key_store,
-                    &mut self.session_store,
-                    &mut self.pre_key_store,
-                    &mut self.signed_pre_key_store,
-                    None,
-                )
-                .await?;
-
+                    padded_message: mut data,
+                    version,
+                } = self
+                    .sealed_session_cipher
+                    .decrypt(ciphertext, envelope.timestamp())
+                    .await?;
                 let sender = ServiceAddress {
-                    phonenumber: sender_e164
-                        .and_then(|n| phonenumber::parse(None, n).ok()),
-                    uuid: Some(Uuid::parse_str(&sender_uuid).map_err(
-                        |_| {
-                            SignalProtocolError::InvalidSealedSenderMessage(
-                                "invalid sender UUID".to_string(),
-                            )
-                        },
-                    )?),
+                    phonenumber: sender_e164,
+                    uuid: sender_uuid,
                     relay: None,
                 };
                 let metadata = Metadata {
@@ -219,10 +212,8 @@ where
                     timestamp: envelope.timestamp(),
                     needs_receipt: false,
                 };
-                Plaintext {
-                    metadata,
-                    data: message,
-                }
+                strip_padding(version, &mut data)?;
+                Plaintext { metadata, data }
             },
             _ => {
                 // else

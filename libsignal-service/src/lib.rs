@@ -5,6 +5,7 @@ mod account_manager;
 pub mod attachment_cipher;
 pub mod cipher;
 pub mod profile_cipher;
+pub mod sealed_session_cipher;
 
 pub mod configuration;
 pub mod content;

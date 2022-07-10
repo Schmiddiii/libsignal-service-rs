@@ -315,6 +315,11 @@ pub enum ServiceError {
     #[error("Protocol error: {0}")]
     SignalProtocolError(#[from] SignalProtocolError),
 
+    #[error("SealedSessionCipher error: {0}")]
+    SealedSessionError(
+        #[from] crate::sealed_session_cipher::SealedSessionError,
+    ),
+
     #[error("{0:?}")]
     MismatchedDevicesException(MismatchedDevices),
 
