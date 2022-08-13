@@ -84,6 +84,7 @@ impl AwcPushService {
                 Err(ServiceError::RateLimitExceeded)
             },
             StatusCode::CONFLICT => {
+                dbg!(response.text());
                 let mismatched_devices =
                     response.json().await.map_err(|e| {
                         log::error!(
