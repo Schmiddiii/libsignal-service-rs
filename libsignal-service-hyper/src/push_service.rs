@@ -211,6 +211,7 @@ impl HyperPushService {
     where
         for<'de> T: Deserialize<'de>,
     {
+        log::trace!("json");
         let body = hyper::body::aggregate(response).await.map_err(|e| {
             ServiceError::ResponseError {
                 reason: format!(
@@ -236,6 +237,7 @@ impl HyperPushService {
     where
         M: ProtobufMessage + Default,
     {
+        log::trace!("protobuf");
         let body = hyper::body::aggregate(response).await.map_err(|e| {
             ServiceError::ResponseError {
                 reason: format!(
@@ -251,6 +253,7 @@ impl HyperPushService {
     async fn text(
         response: &mut Response<Body>,
     ) -> Result<String, ServiceError> {
+        log::trace!("text");
         let body = hyper::body::aggregate(response).await.map_err(|e| {
             ServiceError::ResponseError {
                 reason: format!(
@@ -284,6 +287,7 @@ impl PushService for HyperPushService {
     where
         for<'de> T: Deserialize<'de>,
     {
+        log::trace!("get_json {:#?} {}", service, path);
         let mut response = self
             .request(Method::GET, service, path, credentials_override, None)
             .await?;
@@ -299,6 +303,7 @@ impl PushService for HyperPushService {
     where
         for<'de> T: Deserialize<'de>,
     {
+        log::trace!("delete_json {:#?} {}", service, path);
         let mut response = self
             .request(
                 Method::DELETE,
@@ -323,6 +328,7 @@ impl PushService for HyperPushService {
         for<'de> D: Deserialize<'de>,
         S: MaybeSend + Serialize,
     {
+        log::trace!("put_json {:#?} {}", service, path);
         let json = serde_json::to_vec(&value).map_err(|e| {
             ServiceError::JsonDecodeError {
                 reason: e.to_string(),
@@ -356,6 +362,7 @@ impl PushService for HyperPushService {
         for<'de> D: Deserialize<'de>,
         S: MaybeSend + Serialize,
     {
+        log::trace!("patch_json {:#?} {}", service, path);
         let json = serde_json::to_vec(&value).map_err(|e| {
             ServiceError::JsonDecodeError {
                 reason: e.to_string(),
@@ -389,6 +396,7 @@ impl PushService for HyperPushService {
         for<'de> D: Deserialize<'de>,
         S: MaybeSend + Serialize,
     {
+        log::trace!("post_json {:#?} {}", service, path);
         let json = serde_json::to_vec(&value).map_err(|e| {
             ServiceError::JsonDecodeError {
                 reason: e.to_string(),
@@ -420,6 +428,7 @@ impl PushService for HyperPushService {
     where
         T: Default + libsignal_service::prelude::ProtobufMessage,
     {
+        log::trace!("get_protobuf {:#?} {}", service, path);
         let mut response = self
             .request(Method::GET, service, path, credentials_override, None)
             .await?;
@@ -437,6 +446,7 @@ impl PushService for HyperPushService {
         D: Default + libsignal_service::prelude::ProtobufMessage,
         S: Sized + libsignal_service::prelude::ProtobufMessage,
     {
+        log::trace!("put_protobuf {:#?} {}", service, path);
         let protobuf = value.encode_to_vec();
 
         let mut response = self
@@ -460,6 +470,7 @@ impl PushService for HyperPushService {
         cdn_id: u32,
         path: &str,
     ) -> Result<Self::ByteStream, ServiceError> {
+        log::trace!("get_from_cdn {} {}", cdn_id, path);
         let response = self
             .request(
                 Method::GET,
@@ -484,6 +495,7 @@ impl PushService for HyperPushService {
         value: &[(&str, &str)],
         file: Option<(&str, &'s mut C)>,
     ) -> Result<(), ServiceError> {
+        log::trace!("post_to_cdn0 {} {:#?}", path, value);
         let mut form = mpart_async::client::MultipartRequest::default();
 
         // mpart-async has a peculiar ordering of the form items,
@@ -552,6 +564,7 @@ impl PushService for HyperPushService {
         credentials: Option<ServiceCredentials>,
         keep_alive: bool,
     ) -> Result<SignalWebSocket, ServiceError> {
+        log::trace!("ws {}", path)
         let (ws, stream) = TungsteniteWebSocket::with_tls_config(
             Self::tls_config(&self.cfg),
             self.cfg.base_url(Endpoint::Service),
