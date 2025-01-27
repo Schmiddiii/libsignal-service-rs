@@ -1,12 +1,12 @@
 use reqwest::StatusCode;
 
-use crate::proto::WebSocketResponseMessage;
+use crate::{proto::WebSocketResponseMessage, push_service::MismatchedDevices};
 
 use super::ServiceError;
 
 async fn service_error_for_status<R>(response: R) -> Result<R, ServiceError>
 where
-    R: SignalServiceResponse,
+    R: SignalServiceResponse + std::fmt::Debug,
     ServiceError: From<<R as SignalServiceResponse>::Error>,
 {
     match response.status_code() {
@@ -26,17 +26,25 @@ where
             Err(ServiceError::RateLimitExceeded)
         },
         StatusCode::CONFLICT => {
-            let mismatched_devices =
-                response.json().await.map_err(|error| {
-                    tracing::error!(
-                        %error,
-                        "failed to decode HTTP 409 status"
-                    );
-                    ServiceError::UnhandledResponseCode {
-                        http_code: StatusCode::CONFLICT.as_u16(),
-                    }
-                })?;
-            Err(ServiceError::MismatchedDevicesException(mismatched_devices))
+            dbg!(&response);
+            dbg!(&response.text().await);
+            // let mismatched_devices =
+            //     response.json().await.map_err(|error| {
+            //         tracing::error!(
+            //             %error,
+            //             "failed to decode HTTP 409 status"
+            //         );
+            //         ServiceError::UnhandledResponseCode {
+            //             http_code: StatusCode::CONFLICT.as_u16(),
+            //         }
+            //     })?;
+            panic!("This panic is intended");
+            Err(ServiceError::MismatchedDevicesException(
+                MismatchedDevices {
+                    missing_devices: vec![],
+                    extra_devices: vec![],
+                },
+            ))
         },
         StatusCode::GONE => {
             let stale_devices = response.json().await.map_err(|error| {
