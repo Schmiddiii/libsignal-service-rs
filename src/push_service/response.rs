@@ -13,7 +13,7 @@ where
     let status = response.status_code();
     let body = response.text().await?;
     serde_json::from_str(&body).map_err(move |error| {
-        tracing::error!(%error, "JSON decoding in error handling failed; returning UnhandledResponseCode");
+        tracing::error!(%error, %body, "JSON decoding in error handling failed; returning UnhandledResponseCode");
         ServiceError::UnhandledResponseCode { status, body }
     })
 }
